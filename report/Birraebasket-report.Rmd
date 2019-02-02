@@ -1,0 +1,1148 @@
+---
+title: "<center><div class='mytitle'> Documento di analisi</div></center>"
+
+author: "<center><div class='mysubtitle'>di Andrea Caciolo e Nicolò Ghioldi</div></center>"
+output: 
+  html_document
+---
+<br><br>
+
+# Script:
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,fig.align="center")
+```
+<br><br>
+
+Download delle librerie:
+```{r startup, include = T, message = FALSE, warning = FALSE}
+library("gapminder")
+library("magick")
+library("ggplot2")
+library("ggrepel")
+library("scales")
+library("readr")
+library("readxl")
+library("tidyr")
+library("dplyr")
+library("grid")
+library("tidyverse")  
+library("cluster")    
+library("factoextra")
+library("plotly")
+library("NbClust")
+```
+<br><br>
+
+
+Importiamo i dati:
+```{r startup2, include = T, message = FALSE, warning = FALSE}
+
+stats = read_csv("https://raw.githubusercontent.com/cacio95/StatisticalLearningProject/master/data/Seasons_Stats.csv", 
+    col_types = cols(`3P` = col_integer(), 
+        `3P%` = col_double(), `3PA` = col_integer(), 
+        `3PAr` = col_number(), `AST%` = col_double(), 
+        BLK = col_integer(), `BLK%` = col_double(), 
+        BPM = col_number(), DBPM = col_number(), 
+        DRB = col_integer(), `DRB%` = col_double(), 
+        G = col_integer(), GS = col_integer(), 
+        MP = col_number(), OBPM = col_number(), 
+        ORB = col_integer(), `ORB%` = col_double(), 
+        PER = col_number(), STL = col_integer(), 
+        `STL%` = col_double(), TOV = col_integer(), 
+        `TOV%` = col_double(), TRB = col_integer(), 
+        `TRB%` = col_double(), `USG%` = col_double(), 
+        VORP = col_number(), `WS/48` = col_number(), 
+        blank2 = col_number(), blanl = col_double()))
+playerdata=read_csv("https://raw.githubusercontent.com/cacio95/StatisticalLearningProject/master/data/player_data.csv")
+players=read_csv("https://raw.githubusercontent.com/cacio95/StatisticalLearningProject/master/data/Players.csv")
+beers=read_delim("https://raw.githubusercontent.com/cacio95/StatisticalLearningProject/master/data/beers.csv",";", escape_double = FALSE, trim_ws = TRUE)
+breweries=read_csv("https://raw.githubusercontent.com/cacio95/StatisticalLearningProject/master/data/breweries.csv")
+
+```
+<br><br>
+
+
+Importiamo anno 2017-2018, siccome non è presente nel dataset iniziale sistemiamo i missing values presenti, ponendoli uguali a 0:
+```{r startup3, include = T, message = FALSE, warning = FALSE}
+
+nba = read_delim("https://raw.githubusercontent.com/cacio95/StatisticalLearningProject/master/data/nba.csv", 
+    ";", escape_double = FALSE, trim_ws = TRUE)
+nba2 = read_delim("https://raw.githubusercontent.com/cacio95/StatisticalLearningProject/master/data/nba2.csv", 
+    ";", escape_double = FALSE, trim_ws = TRUE)
+
+nba2=nba2[,c("Rk","Player","Pos","Age","Tm","PER","TS%","3PAr","FTr","ORB%","DRB%","TRB%","AST%","STL%","BLK%","TOV%","USG%","OWS","DWS","WS","WS/48","OBPM","DBPM","BPM","VORP")]
+nba=cbind(nba[,-3],nba2[,6:25])
+nba$Year=2018
+nba=nba[,-1]
+
+is_miss=is.na(nba)
+nba[is_miss]=0
+#posti uguali a 0 poichè gli NA corrsipondono a tale valore. Casi dei giocatori che non hanno fatto tiri ecc..
+
+```
+<br><br>
+
+
+Consideriamo solamente gli anni dal 1990 in poi, siccome prima di questo periodo ci sono più missing values e meno informazioni a noi utili (ad esempio pochi tiri da 3 punti):
+```{r startup4, include = T, message = FALSE, warning = FALSE}
+
+### DATA:
+
+stats=stats[stats$Year >= 1990,]
+stats=stats[,-c(1,22,27)]  #ci sono variabili vuote, le eliminiamo.
+#dati=merge(stats,playerdata,by.x ="Player",by.y="name")
+```
+<br><br>
+
+
+Trattamento dei missing values. Anche in questo caso gli NA corrispondono agli zeri:
+```{r startup5, include = T, message = FALSE, warning = FALSE}
+
+# NA:
+
+is_miss=is.na(stats)
+stats[is_miss]=0
+stats=stats[which(stats$Player!=0),]
+
+is_miss=is.na(playerdata)
+playerdata[is_miss]=0
+
+```
+<br><br>
+
+
+Aggiungiamo la stagione 2018 al nostro dataset iniziale:
+```{r startup6, include = T, message = FALSE, warning = FALSE}
+
+nba=nba[,c("Year","Player","Pos","Age","Tm","G","GS","MP","PER","TS%","3PAr","FTr","ORB%","DRB%","TRB%","AST%","STL%","BLK%","TOV%","USG%","OWS","DWS","WS","WS/48","OBPM","DBPM","BPM","VORP","FG","FGA","FG%","3P","3PA","3P%","2P","2PA","2P%","eFG%","FT","FTA","FT%","ORB","DRB","TRB","AST","STL","BLK","TOV","PF","PTS" )]
+
+stats=rbind(stats,nba)
+```
+<br><br>
+
+
+Rinominiamo le squadre che nel corso degli anni avevano cambiato nome, in modo tale da poterle considerare con i nomi attuali:
+```{r startup7, include = T, message = FALSE, warning = FALSE}
+
+#BRK+NJN=BRK
+#CHA+CHH+CHO=CHO
+#NOH+NOK+NOP=NOP
+#OKC+SEA=OKC
+#MEM+VAN=MEM
+#WAS+WSB=WAS
+
+stats[which(stats$Tm=="NJN"),]$Tm="BRK"
+stats[which(stats$Tm=="CHA"),]$Tm="CHO"
+stats[which(stats$Tm=="CHH"),]$Tm="CHO"
+stats[which(stats$Tm=="NOH"),]$Tm="NOP"
+stats[which(stats$Tm=="NOK"),]$Tm="NOP"
+stats[which(stats$Tm=="SEA"),]$Tm="OKC"
+stats[which(stats$Tm=="VAN"),]$Tm="MEM"
+stats[which(stats$Tm=="WSB"),]$Tm="WAS"
+
+```
+<br><br>
+
+
+Togliamo la squadra Tot da stats, questa considera le statistiche totali dei giocatori che in una stagione hanno cambiato più squadre:
+```{r startup8, include = T, message = FALSE, warning = FALSE}
+
+stats=stats[which(stats$Tm!="TOT"),]
+
+```
+<br><br>
+
+
+Creiamo un nuovo dataset con le variabili che ci interessano:
+```{r startup9, include = T, message = FALSE, warning = FALSE}
+
+## Tentativi da 2pt,3pt e ft per anno + leader:
+
+#facciamo prima una funzione:
+
+anni=as.numeric(names(table(stats$Year)))
+peranno=function(anno) {
+  datiprov=stats[which(stats$Year==anno),]
+  f3p=sum(datiprov$`3P`)
+  tot3p=sum(datiprov$`3PA`)
+  f2p=sum(datiprov$`2P`)
+  tot2p=sum(datiprov$`2PA`)
+  ftp=sum(datiprov$`FT`)
+  totft=sum(datiprov$`FTA`)
+  leaderpt=datiprov[which.max(datiprov$PTS),]$Player
+  leaderast=datiprov[which.max(datiprov$AST),]$Player
+  leadertrb=datiprov[which.max(datiprov$TRB),]$Player
+  leaderstl=datiprov[which.max(datiprov$STL),]$Player
+  leaderblk=datiprov[which.max(datiprov$BLK),]$Player
+  datiprov2=datiprov[which(datiprov$G > 40),]
+  leaderws=datiprov2[which.max(datiprov2$WS),]$Player
+  leaderper=datiprov2[which.max(datiprov2$PER),]$Player
+  leaderbpm=datiprov2[which.max(datiprov2$BPM),]$Player
+  matrix(c(anno,f2p,tot2p,round(f2p/tot2p,2),f3p,tot3p,round(f3p/tot3p,2),ftp,totft,round(ftp/totft,2),leaderpt,leaderast,leadertrb,leaderstl,leaderblk,leaderws,leaderper,leaderbpm),ncol=18,nrow =1)
+}
+
+#ciclo per creare il nostro dataset:
+
+b=1
+serie=matrix(0,nrow = 29,ncol = 18)
+for(i in anni){
+    serie[b,]=peranno(i)
+    b=b+1
+}
+
+#aggiustiamo i dati:
+
+serie=as.data.frame(serie)
+names(serie)=c("anno","f2p","tot2pt","perc2p","f3p","tot3pt","perc3p","ftp","totft","percft","leaderpt","leaderast","leadertrb","leaderstl","leaderblk","leaderws","leaderper","leaderbpm")
+
+for(i in 1:10){
+    serie[,i]=as.numeric(as.character(serie[,i]))   #variabili numeriche
+}   
+
+#aggiungiamo i dati dei lockout, anni in cui si sono giocate meno partite:
+serie$giocaxteam=rep(82,29)
+serie[which(serie$anno==1999),]$giocaxteam=50
+serie[which(serie$anno==2012),]$giocaxteam=66
+serie$squadre=rep(30,29)
+
+#aggiungiamo il numero di squadre per le stagioni in cui i team non erano 30:
+serie[which(serie$anno==1990),]$squadre=27
+serie[which(serie$anno==1991),]$squadre=27
+serie[which(serie$anno==1992),]$squadre=27
+serie[which(serie$anno==1993),]$squadre=27
+serie[which(serie$anno==1994),]$squadre=27
+serie[which(serie$anno==1995),]$squadre=27
+serie[which(serie$anno==1996),]$squadre=29
+serie[which(serie$anno==1997),]$squadre=29
+serie[which(serie$anno==1998),]$squadre=29
+serie[which(serie$anno==1999),]$squadre=29
+serie[which(serie$anno==2000),]$squadre=29
+serie[which(serie$anno==2001),]$squadre=29
+serie[which(serie$anno==2002),]$squadre=29
+serie[which(serie$anno==2003),]$squadre=29
+serie[which(serie$anno==2004),]$squadre=29
+serie$partiteanno=serie$giocaxteam*serie$squadre
+
+#tre nuovi dataset:
+tiriperanno=serie[,c(1:10,21)]
+leaderperanno=serie[,c(1,11:18)]
+partiteperteam=serie[,c(1,19)]
+
+```
+<br><br>
+
+
+Grafici:
+```{r startup10, include = T, message = FALSE, warning = FALSE,}
+
+#grafico animato per studiare la relazione tra i tentativi da 3 punti e quelli da 2 punti, nel corso degli ultimi 30 anni
+
+
+#aggiungiamo due nuove variabili:
+stats$Tentativi.da.2.punti.per.partita=round(stats$`2PA`/stats$G,2)
+stats$Tentativi.da.3.punti.per.partita=round(stats$`3PA`/stats$G,2)
+
+#animazione:
+img <- image_graph(800, 500, res = 96)
+
+e=stats[which(stats$Year==1990),]
+for(i in 1991:2018){
+  prov=stats[which(stats$Year==i),]
+  e=rbind(e,prov)
+}
+e=e[which(e$G > 30),]
+
+datalist=split(e, e$Year)
+out=lapply(datalist, function(data){
+  p=ggplot(data, aes(x=data$'Tentativi.da.2.punti.per.partita', y= data$'Tentativi.da.3.punti.per.partita',col=Pos))+
+    geom_point(size=3,alpha=0.70)+
+    facet_wrap(~Pos)+
+    ggtitle(data$Year)+
+    theme_bw()+
+    ylim(0,15)+
+    xlim(0,25)+
+    scale_color_discrete(name='ruoli')
+  print(p+labs(x = "Tentativi da 2 punti per partita",y="Tentativi da 3 punti per partita"))
+})
+a=dev.off()
+animation = image_animate(img, fps = 2)
+v=print(animation)
+
+#grafico non utilizzato nel blog
+```
+<br><br>
+
+
+
+```{r startup10b, include = T, message = FALSE, warning = FALSE}
+
+#Grafico interattivo per valuate la medesima relazione, dividendo i giocatori per ruoli:
+
+p=ggplot(stats, aes(x=Tentativi.da.2.punti.per.partita, y=Tentativi.da.3.punti.per.partita,color=Pos))+
+    geom_point(aes(frame = Year),alpha=0.7,size=3)+
+    ggtitle(stats$Year)+
+    facet_wrap(~Pos)+
+    ylim(0,15)+
+    xlim(0,25)+
+    theme_minimal()+
+    scale_color_discrete(name='ruoli')+
+    labs(x = "Tentativi da 2 punti per partita",y="Tentativi da 3 punti per partita")
+v=ggplotly(p)
+
+#Grafico non utilizzato nel blog
+```
+<br><br>
+
+
+
+
+```{r startup11, include = T, message = FALSE, warning = FALSE}
+
+#come il precedente ma senza divisione per ruoli
+
+p=ggplot(stats, aes(x=Tentativi.da.2.punti.per.partita, y=Tentativi.da.3.punti.per.partita,color=Pos))+
+    geom_point(aes(frame = Year),alpha=0.6,size=4)+
+    ggtitle(stats$Year)+
+    theme_bw()+
+    ylim(0,15)+
+    xlim(0,25)+
+    scale_color_discrete(name='ruoli')+
+  labs(x = "Tentativi da 2 punti per partita",y="Tentativi da 3 punti per partita")
+v=ggplotly(p)
+
+#non utilizzato nel blog
+```
+<br><br>
+
+
+```{r startup11h, include = T, message = FALSE, warning = FALSE}
+
+#stessa cosa dei precedenti ma considerando solo alcuni anni in modo da rendere la visualizzazione più semplice:
+datiprov=stats[which(stats$Year==1990),]
+for (i in c(1994,1998,2002,2006,2010,2014,2018)) {
+  e=stats[which(stats$Year==i),]
+  datiprov=rbind(datiprov,e)
+}
+
+
+
+p=ggplot(datiprov, aes(x=Tentativi.da.2.punti.per.partita, y=Tentativi.da.3.punti.per.partita,color=Pos))+
+    geom_point(aes(frame = Year),alpha=0.6,size=4)+
+    ggtitle(stats$Year)+
+    theme_bw()+
+    ylim(0,15)+
+    xlim(0,25)+
+    scale_color_discrete(name='ruoli')+
+  labs(x = "Tentativi da 2 punti per partita",y="Tentativi da 3 punti per partita")
+v=ggplotly(p)
+
+#grafico non utilizzato nel blog
+
+```
+<br><br>
+
+
+
+
+
+```{r startup13, include = T, message = FALSE, warning = FALSE}
+
+#serie dei tentativi per le diverse tipologie di tiro
+
+tiri.byyear=aggregate(cbind(Media.tentativi.3pt=round(tot3pt/partiteanno,2),Media.tentativi.2pt=round(tot2pt/partiteanno,2),Media.tentativi.Ft=round(totft/partiteanno,2),Somma.medie.tentativi.2pt.e.3pt=round((tot3pt/partiteanno+tot2pt/partiteanno),2)) ~ anno, data = tiriperanno,FUN = mean)
+tiri2.byyear = gather(tiri.byyear,value = "value",key = "type",Media.tentativi.3pt,Media.tentativi.2pt,Media.tentativi.Ft,Somma.medie.tentativi.2pt.e.3pt)
+a=ggplot(tiri2.byyear,aes(x=anno,y=value,color=type)) + 
+  geom_line(size=2)+scale_color_manual(name = "",labels=c("Media 3pt","Media 2pt","Media tiri liberi","Media 3pt+2pt"),values = c("chocolate1","mediumvioletred","yellow2","yellowgreen"))
+a=a+theme_bw()+ggtitle(label = "Serie storica delle medie dei tentativi")
+v=ggplotly(a)
+
+#non utilizzato nel blog
+
+```
+<br><br>
+
+
+
+Creiamo un nuovo dataset, questa volta con dati per anno e squadra:
+```{r startup14, include = T, message = FALSE, warning = FALSE}
+
+# Dati anno e squadra:
+
+team=names(table(stats$Tm))   
+
+perannoesquadra=function(anno,squadra) {
+  datiprov=stats[which(stats$Year==anno),]
+  datiprov=datiprov[which(datiprov$Tm==squadra),]
+  f3p=sum(datiprov$`3P`)
+  tot3p=sum(datiprov$`3PA`)
+  f3perc=round(f3p/tot3p,2)
+  f2p=sum(datiprov$`2P`)
+  tot2p=sum(datiprov$`2PA`)
+  f2perc=round(f2p/tot2p,2)
+  fft=sum(datiprov$`FT`)
+  totft=sum(datiprov$`FTA`)
+  ftperc=round(fft/totft,2)
+  leaderpt=datiprov[which.max(datiprov$PTS),]$Player
+  leaderast=datiprov[which.max(datiprov$AST),]$Player
+  leadertrb=datiprov[which.max(datiprov$TRB),]$Player
+  leaderstl=datiprov[which.max(datiprov$STL),]$Player
+  leaderblk=datiprov[which.max(datiprov$BLK),]$Player
+  matrix(c(squadra,anno,f2p,tot2p,f2perc,f3p,tot3p,f3perc,fft,totft,ftperc,leaderpt,leaderast,leadertrb,leaderstl,leaderblk),ncol=16,nrow =1)
+}
+
+#ciclo:
+b=1
+serie2=matrix(0,nrow = 29*30,ncol = 16)
+for(j in team){
+  for(i in anni){
+    serie2[b,]=perannoesquadra(anno=i,squadra=j)
+    b=b+1 
+  }
+}
+
+#aggiustiamo le variabili:
+serie2=as.data.frame(serie2)
+names(serie2)=c("squadra","anno","f2p","tot2p","f2perc","f3p","tot3p","f3perc","fft","totft","ftperc","leaderpt","leaderast","leadertrb","leaderstl","leaderblk")
+serie2=serie2[which(serie2$f2perc!= "NaN"),]
+serie2=serie2[which(serie2$squadra != "TOT"),]
+
+# trasformazione numeri e caratteri
+for(i in 2:16){
+  if (i<12)  serie2[,i]=as.numeric(as.character(serie2[,i]))
+  else serie2[,i]=as.character(serie2[,i])
+}
+
+#aggiungiamo partite per squadra
+serie2=merge(serie2,partiteperteam,by="anno")
+
+```
+<br><br>
+
+Grafici:
+```{r startup15, include = T, message = FALSE, warning = FALSE}
+
+#Tentativi 3pt per squadre e anno:
+a=ggplot(serie2,aes(x=squadra,y=tot3p,size=giocaxteam))+
+  theme(legend.position="top",axis.text=element_text(size=6))+
+  geom_point(aes(color=anno),alpha=0.70)+
+  scale_color_gradient2(name="",breaks=c(1990,1998,2008,2017),labels=c("1990","1998","2008","2017"),low = "red",high = "blue", mid="yellow",midpoint=2003)+theme_minimal()
+v=ggplotly(a)
+
+#non utilizzato nel blog
+```
+<br><br>
+
+
+
+```{r startup15b, include = T, message = FALSE, warning = FALSE}
+
+serie2$Rapporto.3pt.2pt=round(serie2$tot3p/serie2$tot2p,2) #variabile rapporto tentativi 3pt/2pt
+names(serie2)[17]="Partite.giocate" #rinominiamo la variabile per le partite giocate
+
+
+a=ggplot(serie2,aes(x=squadra,y=Rapporto.3pt.2pt,size=Partite.giocate))+
+  theme(legend.position="top",axis.text=element_text(size=6))+
+  geom_point(aes(color=anno),alpha=0.70)+
+  scale_color_gradient2(name="",breaks=c(1994,2004,2014),labels=c("1994","2004","2014"),low = "lightgreen",high = "lightsalmon2",mid="lightskyblue3",midpoint=2004)+
+  theme_bw()+
+  labs(x="Abbreviazione squadre",y="Rapporto tentativi 3pt/2pt")+
+  ggtitle(label="Tentativi 3pt/2pt per squadra e anno")
+v=ggplotly(a)
+
+#grafico non utilizzato nel blog
+```
+<br><br>
+  
+
+
+```{r startup15c, include = T, message = FALSE, warning = FALSE}
+
+#stesso grafico di prima ma animato:
+a=ggplot(serie2,aes(x=squadra,y=Rapporto.3pt.2pt,size=Partite.giocate))+
+  theme(legend.position="top",axis.text=element_text(size=6))+
+  geom_point(aes(frame=anno),alpha=0.70)+
+  theme_bw()+
+  labs(x="Abbreviazione squadre",y="Rapporto tentativi 3pt/2pt")+scale_color_gradient2(name="",breaks=c(1994,2004,2014),labels=c("1994","2004","2014"),low = "lightgreen",high = "lightsalmon2",mid="lightskyblue3",midpoint=2004)+
+  ggtitle(label="Tentativi 3pt/2pt per squadra e anno")
+v=ggplotly(a)
+
+mytext=paste("Anno = ", serie2$anno, "\n" , "Squadra= ", serie2$squadra, "\n", "3pt/2pt: ",serie2$Rapporto.3pt.2pt,"\n" , "Partite giocate= ", serie2$Partite.giocate,sep="")
+v=style(p, text=mytext, hoverinfo = "text")
+
+#grafico non utilizzato nel blog
+```
+<br><br>
+
+
+```{r startup15c2, include = T, message = FALSE, warning = FALSE,echo=T,fig.cap="Figura 1: Serie storiche dei tentativi da 3 punti per squadra. Un primo incremento negli anni dal '95 al '97 è stato causato dall'avvicinamento della linea dei tre punti, poi tornata alla distanza di 7.25 metri a partire dal 98' ",fig.align='center',fig.height=5, fig.width=8}
+
+#importiamo i nomi completi delle squadre NBA, in modo da aggregarle alle abbreviazioni
+squadre_nba <- read_delim("StatisticalLearningProject/CLAMSES/Steph&Beer/squadre nba.csv", 
+    ";", escape_double = FALSE, col_names = FALSE, 
+    trim_ws = TRUE)
+squadre_nba <- read_delim("https://raw.githubusercontent.com/cacio95/StatisticalLearningProject/master/data/squadre%20nba.csv",";", escape_double = FALSE, trim_ws = TRUE,col_names = F)
+names(squadre_nba)=c("squadra","nome")
+
+serie2=merge(serie2,squadre_nba,by="squadra")
+
+serie2$Tentativi.medi.3pt=round(serie2$tot3p/serie2$Partite.giocate,2) #tentativi medi da tre punti per anno
+
+#grafico interattivo delle serie storiche:
+sd <- highlight_key(serie2, ~nome, "Scegli una squadra")
+base <- plot_ly(sd, color =("black"), height = 400) %>%
+  group_by(nome)
+p2 <- base %>%
+  add_lines(x = ~anno, y = ~Tentativi.medi.3pt, alpha = 0.8) %>%
+  layout(xaxis = list(title = "Anno"),
+         yaxis= list(title="Tentativi medi da tre punti per partita"))
+subplot(p2, titleX = TRUE,titleY= TRUE, widths = c(1)) %>% 
+  hide_legend() %>%
+  highlight(on = "plotly_click", persistent = F,dynamic = F, selectize = T) 
+
+```
+<br><br>
+
+
+```{r startup15d, include = T, message = FALSE, warning = FALSE,echo=T,fig.cap="Figura 2: Rapporto tentativi 3pt/2pt per squadra e anno. ",fig.align='center',fig.height=4, fig.width=9}
+
+#di nuovo preso in considerazione il valore dato dal rapporto tentativi 3pt/2pt per squadra e anno
+#grafico interattivo di prova:
+
+sd <- highlight_key(serie2, ~anno, "Scegli un anno")
+base <- plot_ly(sd, color =("black"), height = 400) %>%
+  group_by(anno)
+p1 <- base %>%
+  add_bars(x = ~squadra, y = ~Rapporto.3pt.2pt, alpha = 0.5) %>%
+  layout(xaxis = list(title = "Abbreviazione squadra"),yaxis = list(title = "3pt/2pt"))
+r=subplot(p1, titleX = TRUE,titleY = TRUE, widths = c(1)) %>% 
+  hide_legend() %>%
+  highlight(on = "plotly_click", persistent = F,dynamic = F, selectize = T,color = "red")
+
+
+#grafico interattivo finale:
+a=ggplot(serie2,aes(x=squadra,y=Rapporto.3pt.2pt,size=Partite.giocate))+
+  theme(legend.position="top",axis.text=element_text(size=6))+
+  geom_point(aes(color=anno),alpha=0.80,size=4)+
+  scale_color_gradient2(name="",breaks=c(1994,2004,2014),labels=c("1994","2004","2014"),low = "lightgreen",high = "lightsalmon3",mid="lightskyblue3",midpoint=2004)+
+  theme_minimal()+
+  labs(x="Abbreviazione squadre",y="Rapporto tentativi 3pt/2pt")+
+  ggtitle(label="Tentativi 3pt/2pt per squadra e anno")
+ggplotly(a)
+```
+<br><br>
+
+
+```{r startup15t, include = T, message = FALSE, warning = FALSE}
+
+#grafico sulla relazione tenativi 3pt e 2pt
+
+datiprov=stats[which(stats$Year==1990),]
+for (i in c(1994,1998,2002,2006,2010,2014,2018)) {
+  e=stats[which(stats$Year==i),]
+  datiprov=rbind(datiprov,e)
+}
+
+p=ggplot(datiprov, aes(x=Tentativi.da.2.punti.per.partita, y=Tentativi.da.3.punti.per.partita,color=Pos))+
+    geom_point(aes(frame = Year),alpha=0.7,size=3)+
+    ggtitle(stats$Year)+
+    facet_wrap(~Pos)+
+    ylim(0,15)+
+    xlim(0,25)+
+    theme_minimal()+
+    scale_color_discrete(name='ruoli')+
+    labs(x = "Tentativi da 2 punti per partita",y="Tentativi da 3 punti per partita")
+v=ggplotly(p,width = 500, height = 400)
+
+#non utilizzato
+
+```
+<br><br>
+
+
+```{r startup15e, include = T, message = FALSE, warning = FALSE}
+
+#tentativi medi da tre punti per squadra negli ultimi trent'anni:
+a=ggplot(serie2,aes(x=anno,y=Tentativi.medi.3pt,color=squadra))+geom_line()+theme_bw()+labs(y="Tentativi medi da tre punti")+ggtitle("Serie temporali tentativi medi da tre punti per squadra")+scale_color_discrete(name="Abbreviazione squadra")
+v=ggplotly(a)
+
+#grafico non utilizzato nel blog
+```
+<br><br>
+
+
+
+```{r startup16, include = T, message = FALSE, warning = FALSE}
+
+#esempi grafici tentativi 2pt per squadre e anno:
+
+#1
+v=ggplot(serie2,aes(x=squadra,y=tot2p,size=Partite.giocate))+
+  theme(legend.position="top",axis.text=element_text(size=6))+
+  geom_point(aes(color=anno),alpha=0.70)+
+  scale_color_gradient2(name="",breaks=c(1990,1998,2008,2017),labels=c("1990","1998","2008","2017"),low = "blue",high = "green", mid="yellow",midpoint=2003)
+
+#2
+v=ggplot(serie2,aes(x=anno,y=tot2p/Partite.giocate))+geom_line(aes(color=squadra))+theme_minimal()
+
+#3
+p=ggplot(serie2,aes(x=anno,y=tot2p/Partite.giocate))
+p1=p+geom_line()+facet_wrap(~squadra)
+theme_new=theme_bw() +theme(plot.background = element_rect(size = 1, color = "blue", fill = "white"),
+        text=element_text(size = 12, family = "Serif", color = "black"),
+        axis.text.y = element_text(colour = "black"),
+        axis.text.x = element_text(colour = "black"),
+        panel.background = element_rect(fill = "white"),
+        strip.background = element_rect(fill = "yellow"))
+v=p1+theme_new
+
+```
+<br><br>
+
+
+Creiamo un nuovo dataset per anno e ruolo dei giocatori:
+```{r startup17, include = T, message = FALSE, warning = F}
+
+# Dati anno e ruolo:
+
+ruoli=names(table(stats$Pos))   
+
+perannoeruolo=function(anno,ruolo) {
+  datiprov=stats[which(stats$Year==anno),]
+  datiprov=datiprov[which(datiprov$Pos==ruolo),]
+  minutigioc=sum(datiprov$MP)
+  f3p=sum(datiprov$`3P`)
+  tot3p=sum(datiprov$`3PA`)
+  f3perc=round(f3p/tot3p,2)
+  f2p=sum(datiprov$`2P`)
+  tot2p=sum(datiprov$`2PA`)
+  f2perc=round(f2p/tot2p,2)
+  fft=sum(datiprov$`FT`)
+  totft=sum(datiprov$`FTA`)
+  ftperc=round(fft/totft,2)
+  leaderpt=datiprov[which.max(datiprov$PTS),]$Player
+  leaderast=datiprov[which.max(datiprov$AST),]$Player
+  leadertrb=datiprov[which.max(datiprov$TRB),]$Player
+  leaderstl=datiprov[which.max(datiprov$STL),]$Player
+  leaderblk=datiprov[which.max(datiprov$BLK),]$Player
+  matrix(c(ruolo,anno,minutigioc,f2p,tot2p,f2perc,f3p,tot3p,f3perc,fft,totft,ftperc,leaderpt,leaderast,leadertrb,leaderstl,leaderblk),ncol=17,nrow =1)
+}
+#ciclo:
+b=1
+serie3=matrix(0,nrow = 29*5,ncol = 17)
+for(j in ruoli){
+  for(i in anni){
+    serie3[b,]=perannoeruolo(anno=i,ruolo=j)
+    b=b+1 
+  }
+}
+#dataset:
+serie3=as.data.frame(serie3)
+names(serie3)=c("ruolo","anno","minutigioc","f2p","tot2p","f2perc","f3p","tot3p","f3perc","fft","totft","ftperc","leaderpt","leaderast","leadertrb","leaderstl","leaderblk")
+
+# trasformazione numeri e caratteri:
+for(i in 2:17){
+  if (i<13)  serie3[,i]=as.numeric(as.character(serie3[,i]))
+  else serie3[,i]=as.character(serie3[,i])
+}
+
+```
+<br><br>
+
+
+
+```{r startup18, include =T, message = FALSE, warning = FALSE}
+
+
+### Tentativi 3pt per ruolo e anno
+
+serie3$Tentativi.3pt.per.partita=round(round(serie3$tot3p/serie3$minutigioc,4)*48,4) #tentativi da 3pt per partita
+
+#grafico tentativi da 3pt per partita e ruolo dei giocatori:
+a=ggplot(serie3,aes(x=anno,y=Tentativi.3pt.per.partita,color=ruolo))+
+  geom_line(size=1)+
+  theme_bw()+
+  labs(y="Tentativi da 3 punti ogni 48 minuti di gioco")+
+  ggtitle("Serie temporale tentativi da 3 punti per ruolo")+
+  scale_color_manual(values = c("lightgreen","lightsalmon2","lightskyblue3", "purple2","yellow2"))
+v=ggplotly(a)
+
+#grafico non utilizzato nel blog
+
+```
+<br><br>
+
+
+```{r startup19, include = T, message = FALSE, warning = FALSE}
+
+#grafico a torta in movimento per le percentuali dei tentativi da 3 punti (per ruolo):
+
+img <- image_graph(800, 500, res = 96)
+
+e=serie3[which(serie3$anno==1990),]
+e=e %>%  mutate(perc3p=tot3p/sum(tot3p)*100.0) %>%  arrange(desc(perc3p))
+for(i in 1991:2018){
+  prov=serie3[which(serie3$anno==i),]
+  prov=prov %>%  mutate(perc3p=tot3p/sum(tot3p)*100.0) %>%  arrange(desc(perc3p))
+  e=rbind(e,prov)
+}
+
+datalist=split(e, e$anno)
+
+out=lapply(datalist, function(data){
+  p=ggplot(data, aes(x="", y= perc3p, fill=ruolo))+
+    geom_bar(width = 1, size = 1, color = "white", stat = "identity") +
+    coord_polar("y") +
+    geom_text(aes(label = paste0(round(perc3p), "%")),position = position_stack(vjust = 0.5)) +
+    labs(x = NULL, y = NULL, fill = NULL,title = "3p percent") +
+    guides(fill =guide_legend(reverse = TRUE)) +
+    scale_fill_manual(values = c("green", "green3", "green4", "yellow3","yellow2")) +
+    theme_minimal() +
+    theme(axis.line = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank(),
+          plot.title = element_text(hjust = 0.5, color = "black",size=30))+
+    ggtitle(data$anno)
+  print(p)
+})
+a=dev.off()
+animation <- image_animate(img, fps = 2)
+v=print(animation)
+
+#grafico non utilizzato
+```
+<br><br>
+
+
+```{r startup19b, include = T, message = FALSE, warning = FALSE,echo=T,fig.cap="Figura 3: Percentuale dei tentativi da 3 punti sul totale per partita.",fig.align='center',fig.height=5, fig.width=7}
+
+#grafico interattivo per fare la stessa cosa del grafico a torta precedente:
+
+e=serie3[which(serie3$anno==1990),]
+e=e %>%  mutate(perc3p=tot3p/sum(tot3p)*100.0) %>%  arrange(desc(perc3p))
+for(i in 1991:2018){
+  prov=serie3[which(serie3$anno==i),]
+  prov=prov %>%  mutate(perc3p=tot3p/sum(tot3p)*100.0) %>%  arrange(desc(perc3p))
+  e=rbind(e,prov)
+}
+
+
+sd <- highlight_key(e, ~anno, "Scegli un anno")
+base <- plot_ly(sd, color =("black"), height = 350) %>%
+  group_by(anno)
+p1 <- base %>%
+  add_bars(x = ~perc3p, y =~ruolo , alpha = 0.7,marker=list( size=10 , opacity=0.7)) %>%
+  layout(xaxis = list(title = "% tentativi da 3pt per partita"),yaxis = list(title = "Ruolo"))
+subplot(p1, titleX = TRUE,titleY = TRUE, widths = c(1)) %>% 
+  hide_legend() %>%
+  highlight(on = "plotly_click", persistent = F,dynamic = F, selectize = T,color = "red")
+
+
+#prova grafico scatterpolar:
+e=e[which(e$anno==2000),]
+p <- plot_ly( type = 'scatterpolar',r = ~e$perc3p ,   theta = ~e$ruolo,   fill = 'toself'  ) %>%
+  layout( polar = list( radialaxis = list(visible = T,range = c(0,40) )), showlegend = F)
+
+```
+<br><br>
+
+
+
+Creiamo un nuovo dataset contenente le statistiche in carriera dei giocatori:
+```{r startup20, include = T, message = FALSE, warning = FALSE}
+
+#Statistiche giocatori:
+
+giocatori=names(table(stats$Player))
+pergiocatore=function(giocatore) {
+  datiprov=stats[which(stats$Player==giocatore),]
+  RUOLO=names(table(datiprov$Pos))[which.max(table(datiprov$Pos))]
+  STAGIONI=length(table(datiprov$Year))
+  G=sum(datiprov$G)
+  MPpg=round(sum(datiprov$MP)/sum(datiprov$G),2)
+  FG=sum(datiprov$FG)
+  FGA=sum(datiprov$FGA)
+  FGperc=round(FG/FGA*100,2)
+  TWOP=sum(datiprov$`2P`)
+  TWOPA=sum(datiprov$`2PA`)
+  TWOPperc=round(TWOP/TWOPA*100,2)
+  THREEP=sum(datiprov$`3P`)
+  THREEPA=sum(datiprov$`3PA`)
+  THREEPperc=round(THREEP/THREEPA*100,2)
+  FT=sum(datiprov$FT)
+  FTA=sum(datiprov$FTA)
+  FTperc=round(FT/FTA*100,2)
+  ORB=sum(datiprov$ORB)
+  DRB=sum(datiprov$DRB)
+  TRB=sum(datiprov$TRB)
+  AST=sum(datiprov$AST)
+  STL=sum(datiprov$STL)
+  BLK=sum(datiprov$BLK)
+  TOV=sum(datiprov$TOV)
+  PTS=sum(datiprov$PTS)
+  ORBpg=round(ORB/G,2)
+  DRBpg=round(DRB/G,2)
+  TRBpg=round(TRB/G,2)
+  ASTpg=round(AST/G,2)
+  STLpg=round(STL/G,2)
+  BLKpg=round(BLK/G,2)
+  TOVpg=round(TOV/G,2)
+  PTpg=round(PTS/G,2)
+  OWS=round(mean(datiprov$OWS),2)
+  DWS=round(mean(datiprov$DWS),2)
+  WS=round(mean(datiprov$WS),2)
+  PER=round(mean(datiprov$PER),2)
+  OBPM=round(mean(datiprov$OBPM),2)
+  DBPM=round(mean(datiprov$DBPM),2)
+  BPM=round(mean(datiprov$BPM),2)
+  matrix(c(giocatore,STAGIONI,RUOLO,G,MPpg,FGperc,TWOPperc,THREEP,THREEPA,THREEPperc,FTperc,ORBpg,DRBpg,TRBpg,ASTpg,STLpg,BLKpg,TOVpg,PTpg,
+           OWS,DWS,WS,PER,OBPM,DBPM,BPM),ncol=26,nrow =1)
+}
+
+#ciclo
+b=1
+totgiocatori=matrix(0,nrow = 2414,ncol = 26)
+for(i in giocatori){
+    totgiocatori[b,]=pergiocatore(i)
+    b=b+1
+}
+
+#dataset
+totgiocatori=as.data.frame(totgiocatori)
+names(totgiocatori)=c("GIOCATORE","STAGIONI","RUOLO","G","MPpg","FGperc","TWOPperc","THREEP","THREEPA","THREEPperc","FTperc","ORBpg","DRBpg","TRBpg","ASTpg","STLpg","BLKpg","TOVpg","PTpg","OWS","DWS","WS","PER","OBPM","DBPM","BPM")
+
+#NaN e numerici
+for(i in c(6,7,10,11)){
+ totgiocatori[which(totgiocatori[,i]=="NaN"),][,i]=0 
+}
+for(i in 4:26){
+  totgiocatori[,i]=as.numeric(as.character(totgiocatori[,i]))
+}
+
+```
+<br><br>
+
+Individuiamo Stephen Curry:
+```{r startup21, include = T, message = FALSE, warning = FALSE}
+
+#dataset con statistiche in carriera 
+dati=totgiocatori[,c(1,3,9,10,11)]
+dati=dati[which(dati$THREEPA > 300),]  #selezioniamo i giocatori con più di 300 tentativi da 3pt in carriera
+dati=dati[,-3]
+dati$GIOCATORE=as.character(dati$GIOCATORE) #caratteri
+
+#prova cluster k medie in tre gruppi:
+
+fit=kmeans(scale(dati[,3:4]), 3, nstart = 25)
+cluster=factor(fit$cluster)
+dati=data.frame(dati,cluster)
+levels(dati$cluster)=c("a","b","c")
+
+a=ggplot(dati,aes(x=THREEPperc,y=FTperc))+
+  geom_point(color=cluster,size=4,alpha=0.6)+theme_bw()+
+  labs(x="% realizzazione da 3 punti",y="% realizzazione tiri liberi")+
+  ggtitle("% tiri liberi - % tiri da 3 punti")+
+  scale_color_manual(values = c("lightgreen","lightsalmon2","lightskyblue3"))
+
+mytext=paste("Player = ", dati$GIOCATORE, "\n","3pt % = ", dati$THREEPperc, "\n", "Ft %: ",dati$FTperc, sep="")
+p=plotly_build(a)
+v=style(p, text=mytext, hoverinfo = "text",traces=c(1,2,3))
+
+#non utilizzato nel blog
+```
+<br><br>
+
+
+```{r startup21b, include = T, message = FALSE, fig.cap="Figura 4: Percentuale da tre punti e ai tiri liberi in carriera.",warning = FALSE,echo=T,fig.height=5, fig.width=8,fig.align='center'}
+
+#grafico che identifica Curry nel nuovo dataset, in base alla percentuale ai tiri liberi e ai tre punti:
+
+#grafico di prova interattivo:
+library(crosstalk)
+sd <- SharedData$new(dati, ~dati$GIOCATORE, group = "Scegli un giocatore")
+p=plot_ly(sd,color ="orange", x = ~THREEPperc, y = ~FTperc,alpha=0.8,marker=list( size=13 , opacity=0.7),height = 400) %>%
+  group_by(GIOCATORE) %>%hide_legend() %>%
+  layout(xaxis = list(title = "Percentuale tiri da tre punti"), yaxis= list(title="Percentuale tiri liberi"))
+
+r=subplot(p, titleX = TRUE,titleY= TRUE, widths = c(1)) %>% 
+  hide_legend() %>%
+  highlight(on = "plotly_click", persistent = F,dynamic = F, selectize = T,color = "red")
+  
+
+#nuova variabile per classificare l'abilità al tiro:
+dati$tiro=rep(3,702)
+dati[which(dati$THREEPperc<=34 & dati$FTperc<=90),]$tiro=1
+dati[which(dati$THREEPperc<=39 & dati$THREEPperc>34 & dati$FTperc<=95),]$tiro=2
+dati[which(dati$THREEPperc<=40 & dati$FTperc<=70),]$tiro=1
+
+#grafico finale non interattivo:
+a=ggplot(dati,aes(x=THREEPperc,y=FTperc))+
+  geom_point(aes(color=dati$RUOLO,size=factor(dati$tiro),alpha=0.4))+
+  theme_minimal()+
+  geom_text(x=44.8,y=92.3,label="Stephen Curry")+
+  scale_size_manual(values=c(2,3,5))+
+  labs(x="% realizzazione tiri da 3 punti",y="% realizzazione tiri liberi")
+
+a + theme(legend.position="none")  
+ 
+
+```
+<br><br>
+
+
+
+Analisi delle birre vendute in America:
+```{r startup23, include = T, message = FALSE, warning = FALSE}
+
+
+names(breweries)[1]=c("brewery_id")
+beer=merge(beers,breweries,by= "brewery_id") #uniamo il dataset delle birrerie con quello dei tipi di birre
+beer=beer[,-c(1,2,5)] #eliminiamo le variabili superflue
+
+#dataset per valutare la gradazione alcolica delle birre vendute:
+b=1
+stati=names(table(beer$state))
+vuoto=matrix(0,nrow = length(stati),ncol = 3)
+for (i in stati) {
+  datiprov=beer[which(beer$state==i),]
+  datiprov=datiprov[which(datiprov$abv != "NA"),]
+  gradazione.alcolica.media=round(mean(datiprov$abv),3)
+  nr.tipi.di.birre=length(names(table(datiprov$name.x)))
+  vuoto[b,]=c(i,nr.tipi.di.birre,gradazione.alcolica.media)
+  b=b+1
+}
+
+#importiamo il nome degli stati
+stati <- read_delim("https://raw.githubusercontent.com/cacio95/StatisticalLearningProject/master/data/stati.csv", ";", 
+    escape_double = FALSE, col_names = FALSE, 
+    trim_ws = TRUE)
+names(stati)=c("Nome.Stato","Stati")
+
+#sistemaimo il dataset:
+birre=as.data.frame(vuoto)
+names(birre)=c("Stati","Tipi.di.birre","Gradazione.alcolica.media")
+birre=merge(birre,stati,by="Stati")
+
+#cartina americana per le gradazioni alcoliche medie delle birre vendute:
+birre$hover <- with(birre, paste(Nome.Stato, '<br>',"Grad.alcolica.media", Gradazione.alcolica.media,'<br>', "Nr.tipi.birre", Tipi.di.birre))
+
+l <- list(color = toRGB("grey"), width = 0.5)
+g <- list(
+  scope = 'usa',
+  projection = list(type = 'albers usa'),
+  showlakes = TRUE,
+  lakecolor = toRGB('white')
+)
+
+v=plot_geo(birre, locationmode = 'USA-states') %>%
+  add_trace( z = ~birre$Gradazione.alcolica.media,text=birre$hover,
+    locations = birre$Stati,marker = list(line = l)) %>%
+  colorbar(title = "Tasso alcolico")%>%
+layout(title = 'Tasso alcolico medio dei tipi di birre vendute per stato',geo = g )
+
+#grafico non utilizzato
+```
+<br><br>
+
+
+```{r startup24, include = T, message = FALSE, warning = FALSE}
+
+#importiamo manualmente dati mancanti
+beer[1237,]$ibu=20
+beer[1239,]$ibu=30
+beer[1241,]$ibu=10
+beer[1242,]$ibu=25
+beer[1243,]$ibu=70
+
+#eliminiamo gli NA presenti nel dataset, in quanto difficili da ricostruire:
+beers1=beer[which(beer$ibu != "NA"),-c(6,7)]
+beers1=na.omit(beers1)
+beer=beers1
+
+#beer1=beer
+#rownames(beer) = make.names(beer$name.x, unique=TRUE)
+
+#valutazione gruppi per cluster analysis:
+my_data <- scale(beer[,1:2])
+set.seed(123)
+#res.nbclust <- NbClust(my_data, distance = "euclidean",min.nc = 2,method = "complete", index ="all")
+#fviz_nbclust(res.nbclust) + theme_minimal()
+
+#cluster:
+df <- scale(beer[,1:2])
+#facciamo un hierarchical k-means cluster
+res.hk <-hkmeans(df, 4)
+#visualizziamo l'albero:
+v=fviz_dend(res.hk, cex = 0.6, palette = "jco", rect = TRUE, rect_border = "jco", rect_fill = TRUE)
+#visualizziamo i cluster finali hkmeans:
+a=fviz_cluster(res.hk, palette = "jco", repel = F, ggtheme = theme_classic())
+```
+<br><br>
+
+```{r startup24b, include = T, message = FALSE, warning = FALSE}
+
+#rinominiamo i gruppi individuati per identificare la pesantezza delle birre:
+dati=data.frame(beer,res.hk$cluster)
+names(dati)[7]=c("cluster")
+dati$cluster=factor(dati$cluster)
+levels(dati$cluster)=c("Poco alcolica e poco amara","Abbastanza alcolica e amara","Alcolica e amara","Abbastanza alcolica e poco amara")
+
+#importiamo i nomi degli stati
+stati <- read_delim("https://raw.githubusercontent.com/cacio95/StatisticalLearningProject/master/data/stati.csv", ";",     escape_double = FALSE, col_names = FALSE,     trim_ws = TRUE)
+names(stati)=c("Nome.Stato","state")
+dati=merge(dati,stati,by="state")
+
+
+#grafico a tre dimensioni non utilizzato nel blog:
+dati$hover <- with(dati, paste("Città:",dati$city, '<br>',"Nome:", dati$name.x,'<br>', "Tipo:", dati$style,'<br>', "Cluster:", dati$cluster))
+
+v=plot_ly(dati, x = ~ounces, y = ~ibu, z = ~abv,text=dati$hover) %>%  add_markers(color = ~cluster)%>%  layout(scene = list(xaxis = list(title = 'Once'),yaxis = list(title = 'Grado amarezza'), zaxis = list(title = 'Tasso alcolico')))
+
+#grafico a tre dimensioni interattivo non utilizzato nel blog:
+library(crosstalk)
+sd <- SharedData$new(dati, ~dati$state, group = "Scegli uno stato")
+p=plot_ly(sd,  x = ~ounces, y = ~ibu, z = ~abv,text=dati$hover) %>% add_markers(color = ~cluster)%>%
+  group_by(state) %>%hide_legend() %>%
+  layout(xaxis = list(title = "Once"), yaxis= list(title="Grado amarezza"),zaxis = list(title = 'Tasso alcolico'), title="Birra")
+v=subplot(p, titleX = TRUE,titleY= TRUE, widths = c(1)) %>% 
+  hide_legend() %>%
+  highlight(on = "plotly_click", persistent = F,dynamic = TRUE, selectize = TRUE)
+```
+<br><br>
+
+```{r startup24c, include = T, message = FALSE, warning = FALSE,echo= T,fig.cap="Figura 5: Suddivisione delle birre vendute in America in 4 macro gruppi per tasso alcolico e grado di amarezza.",fig.align='center',fig.height=5, fig.width=8}
+
+#grafico interattivo per tasso alcolico e grado di amarezza delle birre vendute negli stati americani (colorato per i gruppi della cluster analysis):
+
+sd <- SharedData$new(dati, ~dati$Nome.Stato, group = "Scegli uno stato")
+p=plot_ly(sd,  x = ~abv, y = ~ibu,text=dati$hover,height = 400) %>% add_markers(color = ~cluster,
+        marker=list( size=14 , opacity=0.7),colors=c("lightgreen","lightsalmon2","lightskyblue3","plum3"))%>%
+  group_by(dati$Nome.Stato) %>%hide_legend() %>%
+  layout(xaxis = list(title = "Tasso alcolico",showline = FALSE, zeroline = FALSE), yaxis= list(title="Grado amarezza",showline = FALSE, zeroline = FALSE))
+subplot(p, titleX = TRUE,titleY= TRUE, widths = c(1)) %>% 
+  hide_legend() %>%
+  highlight(on = "plotly_click", persistent = F,dynamic = F, selectize = T,color = NULL)
+#on = "plotly_click"
+
+```
+<br><br>
+
+```{r startup24d, include = T, message = FALSE, fig.cap="Figura 6: Media per stato dell'indice IBU di alcune delle tipologie di birre vendute.",warning = FALSE,echo=T,fig.align='center',fig.height=5, fig.width=8}
+
+#riclassificazione amarezza delle birre in base all'indice ibu:
+dati$amarezza=rep(0,1404)
+dati[which(dati$ibu <= 30),]$amarezza="poco amara"
+dati[which(dati$ibu > 30 & dati$ibu < 60),]$amarezza="amara"
+dati[which(dati$ibu >= 60 ),]$amarezza="molto amara"
+#table(dati$amarezza)
+dati$amarezza=factor(dati$amarezza)
+
+#dataset per calcolare i valori medi dell'ibu delle birre vendute per stato, con annesso il numero di tipi di birre vendute:
+b=1
+stati=names(table(dati$state))
+vuoto=matrix(0,nrow = length(stati),ncol = 4)
+for (i in stati) {
+  datiprov=dati[which(dati$state==i),]
+  ibu.medio=round(mean(datiprov$ibu),2)
+  gusto.preferito=names(table(datiprov$amarezza))[which.max(table(datiprov$amarezza))] #tipo di birra più venduto
+  nr.tipi.di.birre=length(names(table(datiprov$name.x))) #numero tipi di birre vendute per stato
+  vuoto[b,]=c(i,ibu.medio,nr.tipi.di.birre,gusto.preferito)
+  b=b+1
+}
+
+#importiamo ancora gli stati:
+stati <- read_delim("https://raw.githubusercontent.com/cacio95/StatisticalLearningProject/master/data/stati.csv", ";",  escape_double = FALSE, col_names = FALSE,   trim_ws = TRUE)
+names(stati)=c("Nome.Stato","Stati")
+
+#dataset:
+dati=as.data.frame(vuoto)
+names(dati)=c("Stati","Ibu medio","Tipi.di.birre","Birra.preferita")
+dati=merge(dati,stati,by="Stati")
+
+#cartina per gli stati americani:
+
+dati$hover <- with(dati, paste(Nome.Stato, '<br>',"Birra preferita:", dati$Birra.preferita,'<br>', "Nr.tipi.birre:", dati$Tipi.di.birre))
+
+l <- list(color = toRGB("grey"), width = 0.5)
+g <- list(
+  scope = 'usa',
+  projection = list(type = 'albers usa'),
+  showlakes = TRUE,
+  lakecolor = toRGB('white'),
+  showland = T,
+  landcolor = toRGB("grey90")
+)
+
+plot_geo(dati, locationmode = 'USA-states') %>%
+  add_trace( z = ~dati$`Ibu medio`,text=dati$hover,
+    locations = dati$Stati,marker = list(line = l)) %>%
+  colorbar(title = "Ibu")%>%
+layout(title = 'Dove si preferiscono le birre più amare?',geo = g )
+```
+<br><br>
+
+
+
+# Fonti e Riferimenti:
+
+<br><br>
+
+## Dati
+
+NBA:
+
+- https://www.kaggle.com/drgilermo/nba-players-stats/version/2#
+
+- https://www.basketball-reference.com/leagues/NBA_2018_totals.html
+
+Birre e birrerie:
+
+- https://www.kaggle.com/nickhould/craft-cans
+
+- https://www.ratebeer.com/
+
+<br><br>
+
+## Grafici (ggplot e plotly)
+
+-https://cran.r-project.org/web/packages/magick/vignettes/intro.html
+
+-https://dahtah.github.io/imager/imager.html
+
+-https://cran.r-project.org/web/packages/imager/vignettes/gettingstarted.html
+
+-https://tutorials.iq.harvard.edu/R/Rgraphics/Rgraphics.html#text_(label_points)
+
+-https://www.r-graph-gallery.com/
+
+-https://www.r-graph-gallery.com/get-the-best-from-ggplotly/
+
+-https://plot.ly/r/choropleth-maps/
+
+-https://plotly-book.cpsievert.me/linking-views-without-shiny.html
+
+-https://plot.ly/r/animations/
+
+<br><br>
+
+## Cluster
+
+-http://www.sthda.com/english/wiki/print.php?id=234
+
+<br><br>
+
+## R-Markdown e IosSlide
+
+-https://holtzy.github.io/Pimp-my-rmd/#text-formatting
+
+-https://bookdown.org/yihui/rmarkdown/slidy-presentation.html
+
+<br><br>
+
+## Riferimento
+
+-https://pudding.cool/2017/04/beer/
+
+
+
+
